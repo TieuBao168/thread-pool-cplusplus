@@ -23,6 +23,6 @@ WORKDIR /app/build
 
 # Set the entry point command
 # Replace "program_name" with your actual executable name
-CMD ["sh", "-c", "./thread_pool_binary 2>&1 | tee run.log"]
+CMD ["sh", "-c", "./thread_pool_binary > run.log 2>&1 && cat run.log"]
 # Or use bash as entry point:
 # CMD ["/bin/bash"]
