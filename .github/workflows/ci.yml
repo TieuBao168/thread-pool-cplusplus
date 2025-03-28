@@ -1,0 +1,23 @@
+name: C++ CI with Docker
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Build Docker image
+        run: docker build -t cpp-thread-pool .
+
+      - name: Run the binary inside Docker container
+        run: docker run cpp-thread-pool
