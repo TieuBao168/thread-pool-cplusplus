@@ -23,14 +23,15 @@ jobs:
         run: |
           docker run --name my_container -d cpp-thread-pool
           timeout 30s docker wait my_container || echo "Timeout reached, force stopping..."
-          docker logs my_container > run.log
-          docker stop my_container || true
-          
+          docker logs my_container > docker_console.log
+
       - name: Copy logs from Docker container
         run: |
           docker cp my_container:/app/build.log build.log || echo "No build.log found"
           docker cp my_container:/app/run.log run.log || echo "No run.log found"
-          docker rm -f my_container
+
+      - name: Stop and remove container
+        run: docker rm -f my_container
 
       - name: Upload logs as artifacts
         uses: actions/upload-artifact@v4
@@ -39,3 +40,4 @@ jobs:
           path: |
             build.log
             run.log
+            docker_console.log
