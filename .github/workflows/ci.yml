@@ -11,6 +11,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 5 #timeout 5 minutes 
 
     steps:
       - name: Checkout repository
@@ -19,20 +20,22 @@ jobs:
       - name: Build Docker image
         run: docker build -t cpp-thread-pool .
 
-      - name: Run the binary inside Docker container
-        run: docker run cpp-thread-pool
-        
-      - name: Copy logs from Docker container
+      - name: Run the binary inside Docker container with timeout
+        run: |
+          timeout 60s docker run cpp-thread-pool | tee ci_output.log || echo "Process timed out!"
+
+      - name: Copy logs from container
         run: |
           CONTAINER_ID=$(docker create cpp-thread-pool)
-          docker cp $CONTAINER_ID:/app/build.log build.log
-          docker cp $CONTAINER_ID:/app/run.log run.log
-          docker rm $CONTAINER_ID
+          docker cp $CONTAINER_ID:/app/build.log .
+          docker cp $CONTAINER_ID:/app/run.log .
+          docker rm -v $CONTAINER_ID
 
-      - name: Upload logs as artifacts
+      - name: Upload build and run logs
         uses: actions/upload-artifact@v4
         with:
-          name: build-and-run-logs
+          name: logs
           path: |
             build.log
             run.log
+            ci_output.log
