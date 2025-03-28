@@ -25,4 +25,4 @@ WORKDIR /app/build
 # Replace "program_name" with your actual executable name
 # CMD ["./program_name"]
 # Or use bash as entry point:
-CMD ["/bin/bash"] > run.log 2>&1 && cat run.log
+CMD ["/bin/bash > run.log 2>&1 && tail -f run.log"]
