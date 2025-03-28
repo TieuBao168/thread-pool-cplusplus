@@ -21,3 +21,18 @@ jobs:
 
       - name: Run the binary inside Docker container
         run: docker run cpp-thread-pool
+        
+      - name: Copy logs from Docker container
+        run: |
+          CONTAINER_ID=$(docker create cpp-thread-pool)
+          docker cp $CONTAINER_ID:/app/build.log build.log
+          docker cp $CONTAINER_ID:/app/run.log run.log
+          docker rm $CONTAINER_ID
+
+      - name: Upload logs as artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-and-run-logs
+          path: |
+            build.log
+            run.log
