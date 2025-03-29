@@ -45,7 +45,7 @@ ThreadPool::~ThreadPool() {
 bool ThreadPool::initialize(const std::string& configFile) {
     std::ifstream config(configFile);
     if (!config.is_open()) {
-        std::cerr << "Failed to open config file: " << configFile << std::endl;
+        std::cerr << "Failed to open config file: " << configFile << "\n";
         return false;
     }
     
@@ -62,7 +62,7 @@ bool ThreadPool::initialize(const std::string& configFile) {
     }
     
     if (numTaskPushers <= 0 || numWorkers <= 0) {
-        std::cerr << "Invalid configuration values" << std::endl;
+        std::cerr << "Invalid configuration values" << "\n";
         return false;
     }
     
@@ -105,16 +105,23 @@ void ThreadPool::taskPusherThread(int id) {
     CPU_ZERO(&cpuset);
     CPU_SET(0, &cpuset);
     pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
-    std::cout << "Task pusher thread " << id << " started on core 0" << std::endl;
+    std::cout << "Task pusher thread " << id << " started on core 0" << "\n";
 
-    // This is just a placeholder. In a real implementation, this would
+    /* Create tasks example
+    TaskData* task[5] = {nullptr};
+    task[0] = new TaskData{CommonTask::getAddTask<int, float>, 50, 30};
+    task[1] = new TaskData{CommonTask::getSubtractTask<int, float>, 50, 30};
+    task[2] = new TaskData{CommonTask::getMultiplyTask<int, int>, 5, 7};
+    task[3] = new TaskData{CommonTask::getDivideTask<int, int>, 100, 0};
+    task[4] = new TaskData{CommonTask::getFibonacciTask<int>, 10};
+    */
+
     // generate tasks based on some data source or trigger.
     while (running) {
         // Sleep to simulate work
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        
-        // In a real implementation, this would check for new data
-        // and create tasks accordingly
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        this->pushTask(static_cast<void*>(CommonTask::generateRandomTask()));
+        std::cout << "Task pushed by task pusher thread " << id << "\n";
     }
 }
 
@@ -124,9 +131,7 @@ void ThreadPool::workerThread(int id) {
     CPU_ZERO(&cpuset);
     CPU_SET(1, &cpuset);
     pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
-    std::cout << "Worker thread " << id << " started on core 1" << std::endl;
-    
-    std::this_thread::sleep_for(std::chrono::milliseconds(6000));
+    std::cout << "Worker thread " << id << " started on core 1" << "\n";
 
     while (running) {
         void* taskData = nullptr;
@@ -157,8 +162,11 @@ void ThreadPool::workerThread(int id) {
         }
         
         if (taskData != nullptr) {
+            std::cout << "Worker thread " << id << " processing task..." << "\n";
             TaskData* data = static_cast<TaskData*>(taskData);
-            data->callBackFunc(data->value_1, data->value_2);
+            data->callBackFunc();
+            // Sleep to simulate work
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
             delete data;
         }
         delete nodeToDelete;

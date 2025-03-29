@@ -2,7 +2,7 @@
 
 # Compiler and flags
 CXX := g++
-CXXFLAGS := -Wall -Wextra -std=c++11 -pthread -O2 -MMD -MP
+CXXFLAGS := -Wall -Wextra -std=c++17 -pthread -O2 -MMD -MP
 LDFLAGS := -pthread
 
 # Folders
@@ -43,9 +43,9 @@ $(MAIN_OBJ): $(MAIN_SRC) | directories
 
 # Link the final executable
 $(TARGET): $(OBJS) $(MAIN_OBJ)
-	@echo "Building $(BIN_NAME)..."
+	@echo "Building..."
 	@$(CXX) $(OBJS) $(MAIN_OBJ) $(LDFLAGS) -o $@ && \
-	 (echo "Build complete! -> File located at $(BUILD_DIR)/$(BIN_NAME)" && exit 0) || \
+	 (echo "Build complete! -> File $(BIN_NAME)" && exit 0) || \
 	 (echo "Build failed!" && exit 1)
 
 # Include dependencies
