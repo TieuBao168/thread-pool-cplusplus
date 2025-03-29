@@ -1,0 +1,49 @@
+@startuml ThreadPoolComponentDiagram
+title **Thread Pool Component Diagram**
+skinparam componentStyle uml2
+scale 1.5
+!define DPI 300
+
+
+package "Task Pusher (1..m)" {
+    [Task Pusher 1]
+    [Task Pusher 2]
+    [Task Pusher m]
+}
+
+package "Task Queue" {
+    [Task o]
+    [...]
+    [Task 2]
+    [Task 1]
+}
+
+package "Worker Pool (1..n)" {
+    [Worker 1]
+    [Worker 2]
+    [Worker n]
+}
+
+() "enqueue" as Enqueue
+() "dequeue" as Dequeue
+
+left to right direction
+[Task Pusher 1] --> Enqueue
+[Task Pusher 2] --> Enqueue
+[Task Pusher m] --> Enqueue
+
+Enqueue --> [Task o]
+[Task o] --> [...]
+[...] --> [Task 2]
+[Task 2] --> [Task 1]
+[Task 1] --> Dequeue
+
+Dequeue --> [Worker 1]
+Dequeue --> [Worker 2]
+Dequeue --> [Worker n]
+
+note left of [Task Queue]
+  Centralized task management
+  Thread-safe queue mechanism
+end note
+@enduml
