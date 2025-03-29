@@ -1,50 +1,111 @@
 #include "common_task.hpp"
-#include <iostream>
+#include <random>
+#include <ctime>
 
-std::function<void(int, int)> CommonTask::getAddTask() {
-    return [](int a, int b) {
-        std::cout << "Addition: " << a << " + " << b << " = " << (a + b) << std::endl;
-    };
-}
-
-std::function<void(int, int)> CommonTask::getSubtractTask() {
-    return [](int a, int b) {
-        std::cout << "Subtraction: " << a << " - " << b << " = " << (a - b) << std::endl;
-    };
-}
-
-std::function<void(int, int)> CommonTask::getMultiplyTask() {
-    return [](int a, int b) {
-        std::cout << "Multiplication: " << a << " * " << b << " = " << (a * b) << std::endl;
-    };
-}
-
-std::function<void(int, int)> CommonTask::getDivideTask() {
-    return [](int a, int b) {
-        if (b == 0) {
-            std::cout << "Division by zero error" << std::endl;
-            return;
+TaskData* CommonTask::generateRandomTask() {
+    static std::mt19937 rng(static_cast<unsigned int>(std::time(nullptr)));
+    
+    std::uniform_int_distribution<int> taskTypeDist(0, static_cast<int>(TaskType::Count) - 1);
+    TaskType taskType = static_cast<TaskType>(taskTypeDist(rng));
+    
+    std::uniform_int_distribution<int> argCountDist(1, 5);
+    int argCount = argCountDist(rng);
+    
+    std::uniform_int_distribution<int> argValueDist(1, 20);
+    
+    std::uniform_int_distribution<int> nonZeroArgDist(1, 20);
+    
+    TaskData* task = nullptr;
+    
+    switch (taskType) {
+        case TaskType::Addition: {
+            if (argCount == 1) {
+                task = new TaskData(getAddTask<int>, argValueDist(rng));
+            } else if (argCount == 2) {
+                task = new TaskData(getAddTask<int, int>, 
+                                   argValueDist(rng), argValueDist(rng));
+            } else if (argCount == 3) {
+                task = new TaskData(getAddTask<int, int, int>, 
+                                   argValueDist(rng), argValueDist(rng), argValueDist(rng));
+            } else if (argCount == 4) {
+                task = new TaskData(getAddTask<int, int, int, int>, 
+                                   argValueDist(rng), argValueDist(rng), 
+                                   argValueDist(rng), argValueDist(rng));
+            } else {
+                task = new TaskData(getAddTask<int, int, int, int, int>, 
+                                   argValueDist(rng), argValueDist(rng), argValueDist(rng), 
+                                   argValueDist(rng), argValueDist(rng));
+            }
+            break;
         }
-        std::cout << "Division: " << a << " / " << b << " = " << (a / b) << std::endl;
-    };
-}
-
-std::function<void(int, int)> CommonTask::getFibonacciTask() {
-    return [](int n, int unused) {
-        (void)unused; // Suppress unused parameter warning
-        if (n <= 0) {
-            std::cout << "Fibonacci requires a positive integer" << std::endl;
-            return;
+        case TaskType::Subtraction: {
+            if (argCount == 1) {
+                task = new TaskData(getSubtractTask<int>, argValueDist(rng));
+            } else if (argCount == 2) {
+                task = new TaskData(getSubtractTask<int, int>, 
+                                   argValueDist(rng), argValueDist(rng));
+            } else if (argCount == 3) {
+                task = new TaskData(getSubtractTask<int, int, int>, 
+                                   argValueDist(rng), argValueDist(rng), argValueDist(rng));
+            } else if (argCount == 4) {
+                task = new TaskData(getSubtractTask<int, int, int, int>, 
+                                   argValueDist(rng), argValueDist(rng), 
+                                   argValueDist(rng), argValueDist(rng));
+            } else {
+                task = new TaskData(getSubtractTask<int, int, int, int, int>, 
+                                   argValueDist(rng), argValueDist(rng), argValueDist(rng), 
+                                   argValueDist(rng), argValueDist(rng));
+            }
+            break;
         }
-        
-        int a = 0, b = 1;
-        std::cout << "Fibonacci sequence for n=" << n << ": ";
-        for (int i = 0; i < n; ++i) {
-            std::cout << a << " ";
-            int temp = a;
-            a = b;
-            b = temp + b;
+        case TaskType::Multiplication: {
+            if (argCount == 1) {
+                task = new TaskData(getMultiplyTask<int>, argValueDist(rng));
+            } else if (argCount == 2) {
+                task = new TaskData(getMultiplyTask<int, int>, 
+                                   argValueDist(rng), argValueDist(rng));
+            } else if (argCount == 3) {
+                task = new TaskData(getMultiplyTask<int, int, int>, 
+                                   argValueDist(rng), argValueDist(rng), argValueDist(rng));
+            } else if (argCount == 4) {
+                task = new TaskData(getMultiplyTask<int, int, int, int>, 
+                                   argValueDist(rng), argValueDist(rng), 
+                                   argValueDist(rng), argValueDist(rng));
+            } else {
+                task = new TaskData(getMultiplyTask<int, int, int, int, int>, 
+                                   argValueDist(rng), argValueDist(rng), argValueDist(rng), 
+                                   argValueDist(rng), argValueDist(rng));
+            }
+            break;
         }
-        std::cout << std::endl;
-    };
+        case TaskType::Division: {
+            if (argCount == 1) {
+                task = new TaskData(getDivideTask<int>, nonZeroArgDist(rng));
+            } else if (argCount == 2) {
+                task = new TaskData(getDivideTask<int, int>, 
+                                   nonZeroArgDist(rng), nonZeroArgDist(rng));
+            } else if (argCount == 3) {
+                task = new TaskData(getDivideTask<int, int, int>, 
+                                   nonZeroArgDist(rng), nonZeroArgDist(rng), nonZeroArgDist(rng));
+            } else if (argCount == 4) {
+                task = new TaskData(getDivideTask<int, int, int, int>, 
+                                   nonZeroArgDist(rng), nonZeroArgDist(rng), 
+                                   nonZeroArgDist(rng), nonZeroArgDist(rng));
+            } else {
+                task = new TaskData(getDivideTask<int, int, int, int, int>, 
+                                   nonZeroArgDist(rng), nonZeroArgDist(rng), nonZeroArgDist(rng), 
+                                   nonZeroArgDist(rng), nonZeroArgDist(rng));
+            }
+            break;
+        }
+        case TaskType::Fibonacci: {
+            // Fibonacci only needs one argument
+            task = new TaskData(getFibonacciTask<int>, argValueDist(rng));
+            break;
+        }
+        default:
+            std::cerr << "Unknown task type!" << std::endl;
+            break;
+    }
+    return task;
 }
