@@ -1,71 +1,63 @@
-.PHONY: all build directories clean rebuild run
+.PHONY: all build directories clean rebuild run help
 
-# Compiler and flags
 CXX := g++
 CXXFLAGS := -Wall -Wextra -std=c++17 -pthread -O2 -MMD -MP
 LDFLAGS := -pthread
 
-# Folders
-INCLUDE_DIR := include
 SRC_DIR := src
-OBJ_DIR := obj
-DEP_DIR := dep
+INCLUDE_DIRS := include
 BUILD_DIR := build
+OBJ_DIR := $(BUILD_DIR)/obj
+DEP_DIR := $(BUILD_DIR)/dep
+BIN_DIR := bin
 BIN_NAME := thread_pool_binary
 
-# Detect source files
-SRCS := $(filter-out $(SRC_DIR)/main.cpp, $(wildcard $(SRC_DIR)/*.cpp))
+CXXFLAGS += $(foreach dir,$(shell find $(INCLUDE_DIRS) -type d),-I$(dir))
+
+SRCS := $(filter-out $(SRC_DIR)/main.cpp, $(shell find $(SRC_DIR) -name "*.cpp"))
 MAIN_SRC := $(SRC_DIR)/main.cpp
 
-# Object and dependency files
-OBJS := $(patsubst $(SRC_DIR)/%.cpp, $(OBJ_DIR)/%.o, $(SRCS))
+OBJS := $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(SRCS)))
+DEPS := $(patsubst %.cpp,$(DEP_DIR)/%.d,$(notdir $(SRCS)))
 MAIN_OBJ := $(OBJ_DIR)/main.o
-DEPS := $(patsubst $(OBJ_DIR)/%.o, $(DEP_DIR)/%.d, $(OBJS) $(MAIN_OBJ))
+MAIN_DEP := $(DEP_DIR)/main.d
 
-# Target executable
-TARGET := $(BUILD_DIR)/$(BIN_NAME)
+TARGET := $(BIN_DIR)/$(BIN_NAME)
 
-# Default target
 all: directories $(TARGET)
 
-# Create necessary directories
 directories:
-	mkdir -p $(BUILD_DIR) $(OBJ_DIR) $(DEP_DIR)
+	mkdir -p $(OBJ_DIR) $(DEP_DIR) $(BIN_DIR)
 
-# Compile object files
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp | directories
-	$(CXX) $(CXXFLAGS) -I$(INCLUDE_DIR) -c $< -o $@
-	mv $(OBJ_DIR)/$*.d $(DEP_DIR)/$*.d
+$(OBJ_DIR)/%.o: $(SRC_DIR)/*/%.cpp | directories
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+	@mv $(@:.o=.d) $(DEP_DIR)/$(notdir $(@:.o=.d))
 
 $(MAIN_OBJ): $(MAIN_SRC) | directories
-	$(CXX) $(CXXFLAGS) -I$(INCLUDE_DIR) -c $< -o $@
-	mv $(OBJ_DIR)/main.d $(DEP_DIR)/main.d
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+	@mv $(@:.o=.d) $(MAIN_DEP)
 
-# Link the final executable
 $(TARGET): $(OBJS) $(MAIN_OBJ)
-	@echo "Building..."
+	@echo "Linking..."
 	@$(CXX) $(OBJS) $(MAIN_OBJ) $(LDFLAGS) -o $@ && \
-	 (echo "Build complete! -> File $(BIN_NAME)" && exit 0) || \
-	 (echo "Build failed!" && exit 1)
+	 (echo ":> Build complete! -> $(TARGET)" && exit 0) || \
+	 (echo ":< Build failed!" && exit 1)
 
-# Include dependencies
--include $(DEPS)
+-include $(DEPS) $(MAIN_DEP)
 
-# Clean
 clean:
-	rm -rf $(BUILD_DIR)/*binary* $(OBJ_DIR)/*.o $(DEP_DIR)/*.d
+	find $(OBJ_DIR) -type f ! -name '.gitkeep' -delete
+	find $(DEP_DIR) -type f ! -name '.gitkeep' -delete
+	rm -f $(TARGET)
 
-# Clean and rebuild
 rebuild: clean all
 
-# Run program
 run: all
-	cd $(BUILD_DIR) && ./$(BIN_NAME)
+	./$(TARGET)
 
-# Help command
 help:
 	@echo "Usage:"
 	@echo "  make all       - Build the project"
-	@echo "  make clean     - Remove build files"
+	@echo "  make clean     - Remove build files (preserve .gitkeep)"
 	@echo "  make rebuild   - Clean and rebuild"
 	@echo "  make run       - Run the executable"

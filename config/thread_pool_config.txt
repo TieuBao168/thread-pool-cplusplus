@@ -1,0 +1,12 @@
+# Thread Pool Configuration File
+# Format: key = value
+
+# Core configuration
+task_pusher_count       = 2           # Number of task pusher threads 
+worker_count            = 3           # Number of worker threads
+queue_size              = 200         # Maximum number of tasks in the queue
+dynamic_sizing          = true        # Whether to adjust thread count based on load
+
+# Monitoring
+lifecycle_timeout       = 10          # Seconds before a thread is removed
+enable_monitoring       = true        # Enable performance monitoring

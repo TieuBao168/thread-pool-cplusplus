@@ -1,8 +1,9 @@
-#include "thread_pool.hpp"
-#include "common_task.hpp"
 #include <iostream>
 #include <thread>
 #include <sstream>
+#include "utils/CommonTask.hpp"
+#include "utils/ConfigLoader.hpp"
+#include "tinythpool/ThreadPool.hpp"
 
 ThreadPool::ThreadPool() : 
     numTaskPushers(0), 
@@ -42,24 +43,11 @@ ThreadPool::~ThreadPool() {
     }
 }
 
-bool ThreadPool::initialize(const std::string& configFile) {
-    std::ifstream config(configFile);
-    if (!config.is_open()) {
-        std::cerr << "Failed to open config file: " << configFile << "\n";
-        return false;
-    }
-    
-    std::string line, key;
-    while (std::getline(config, line)) {
-        std::istringstream iss(line);
-        if (iss >> key) {
-            if (key == "NUMS_OF_TASK_PUSHER") {
-                iss >> numTaskPushers;
-            } else if (key == "NUMS_OF_WORKER") {
-                iss >> numWorkers;
-            }
-        }
-    }
+bool ThreadPool::initialize() {
+    ConfigLoader& config = ConfigLoader::getInstance();
+
+    numTaskPushers = config.getValue<int>("task_pusher_count", 1);
+    numWorkers = config.getValue<int>("worker_count", 1);
     
     if (numTaskPushers <= 0 || numWorkers <= 0) {
         std::cerr << "Invalid configuration values" << "\n";
@@ -116,12 +104,11 @@ void ThreadPool::taskPusherThread(int id) {
     task[4] = new TaskData{CommonTask::getFibonacciTask<int>, 10};
     */
 
-    // generate tasks based on some data source or trigger.
     while (running) {
-        // Sleep to simulate work
+        // Simulate work
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         this->pushTask(static_cast<void*>(CommonTask::generateRandomTask()));
-        std::cout << "Task pushed by task pusher thread " << id << "\n";
+        // std::cout << "Task pushed by task pusher thread " << id << "\n";
     }
 }
 
@@ -137,7 +124,6 @@ void ThreadPool::workerThread(int id) {
         void* taskData = nullptr;
         TaskNode* nodeToDelete = nullptr;
 
-        // Lock the task queue for safe access
         {
             std::unique_lock<std::mutex> lock(listMutex);
             listCondition.wait(lock, [this] { 
@@ -148,7 +134,6 @@ void ThreadPool::workerThread(int id) {
                 return;
             }
             
-            // Retrieve the task from the front of the queue
             if (head != nullptr) {
                 nodeToDelete = head;
                 taskData = head->data;
