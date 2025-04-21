@@ -1,12 +1,19 @@
-#include "thread_pool.hpp"
-#include "common_task.hpp"
 #include <iostream>
 #include <chrono>
 #include <thread>
 #include <unistd.h>
+#include "utils/ConfigLoader.hpp"
+#include "tinythpool/ThreadPool.hpp"
 
 int main() {
+    ConfigLoader& config = ConfigLoader::getInstance();
+    if (!config.initialize("config/thread_pool_config.txt")) {
+        std::cerr << "Failed to load configuration file!" << std::endl;
+        return 1;
+    }
+
     ThreadPool pool;
+
     unsigned int totalThreads = std::thread::hardware_concurrency();
     long physicalCores = sysconf(_SC_NPROCESSORS_ONLN);
     std::cout << "#### CPU INFO #####" << "\n";
@@ -15,7 +22,7 @@ int main() {
     std::cout << "Threads per Core: " << (totalThreads / physicalCores) << "\n";
     
     std::cout << "\n##### Initializing thread pool #####" << "\n";
-    if (!pool.initialize("threadpool_config.txt")) {
+    if (!pool.initialize()) {
         std::cerr << "Failed to initialize thread pool" << "\n";
         return 1;
     }
@@ -25,7 +32,9 @@ int main() {
               << pool.getNumWorkers() << " workers]" << "\n";
     
     // Wait for tasks to complete
-    std::this_thread::sleep_for(std::chrono::seconds(10));
+    int timeout = config.getValue<int>("lifecycle_timeout", 60);
+    std::cout << "Will close thread pool after " << timeout << " seconds" << "\n";
+    std::this_thread::sleep_for(std::chrono::seconds(timeout));
     
     std::cout << "Main thread exiting" << "\n";
     return 0;

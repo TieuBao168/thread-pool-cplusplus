@@ -28,10 +28,9 @@ public:
      * Reads the configuration file and initializes the thread pool with the specified
      * number of task pusher and worker threads.
      * 
-     * @param configFile The file path to the configuration file.
      * @return True if the initialization succeeds, false otherwise.
      */
-    bool initialize(const std::string& configFile);
+    bool initialize();
 
     /**
      * @brief Push a task onto the thread pool's task queue.
