@@ -1,348 +1,206 @@
-# tp — a configurable C++17 thread pool
+# tp — C++17 thread pool
 
-`tp` is a small, dependency-free thread-pool library for C++17. It runs a fixed
-set of worker threads and lets any thread hand them work, either as a typed
-`std::future` or as fire-and-forget. Defaults work as-is, and every setting can
-also come from a config file, environment variables or code.
+A small, dependency-free thread pool for C++17. Integrate it with one CMake line,
+configure it from a file, environment variables or code.
 
-## Features
+- `submit()` returns a typed `std::future`; `post()` is fire-and-forget
+- Bounded queue with `block` / `reject` / `caller_runs` overflow policies
+- `drain` / `discard` shutdown, stats, pluggable logging
+- Optional CPU pinning and thread names (Linux, Windows, macOS)
 
-- **Typed `submit()`**: returns `std::future<R>` for any callable plus its
-  arguments. Exceptions thrown by the task come back out of `future::get()`.
-- **Fire-and-forget `post()`**: no future to manage. Exceptions are logged and
-  counted.
-- **Bounded or unbounded queue** with an overflow policy: `block`, `reject` or
-  `caller_runs`.
-- **Shutdown policy**: `drain` runs every queued task, `discard` drops them
-  (their futures get `broken_promise`).
-- **Optional CPU affinity**: round-robin, or an explicit CPU list.
-- **Thread naming** (`tp-worker-0`, `tp-worker-1`, ...) so workers are easy to
-  find in debuggers and profilers.
-- **Statistics**: pending, active, completed, failed and rejected counts.
-- **Layered configuration**: built-in defaults, then an INI-style file, then
-  `TP_*` environment variables, then code (fluent setters).
-- **Pluggable logging**: send library messages to your own logger.
-- **Cross-platform**: Linux, Windows (MSVC and MinGW) and macOS. No
-  dependencies beyond the standard library and the platform thread API.
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph CFG["tp::Config (lowest → highest priority)"]
+        direction TB
+        D[defaults] --> F["config file (.ini)"] --> E["TP_* env vars"] --> C[code]
+    end
+
+    subgraph APP[Your application]
+        T1[thread A]
+        T2[thread B]
+    end
+
+    subgraph POOL[tp::ThreadPool]
+        direction LR
+        ENQ{"queue full?"}
+        Q[("task queue<br/>std::deque + mutex")]
+        W0[worker 0]
+        W1[worker 1]
+        WN[worker N-1]
+        ENQ -- no --> Q
+        Q --> W0 & W1 & WN
+    end
+
+    CFG -. "constructs" .-> POOL
+    T1 & T2 -- "submit(f, args) / post(f)" --> ENQ
+    ENQ -- "block: wait for space" --> ENQ
+    ENQ -- "reject" --> REJ["QueueFullError / false"]
+    ENQ -- "caller_runs" --> RUN["run on the caller"]
+    W0 & W1 & WN -- "result or exception" --> FUT["std::future"]
+```
+
+Workers sleep on a condition variable while the queue is empty. A producer
+wakes a sleeper only if the wakeups already in flight can't cover the queued
+tasks, which avoids a lock convoy when many workers are idle.
 
 ## Quick start
 
 ```cpp
 #include <tp/thread_pool.hpp>
-#include <iostream>
 
-int main() {
-    tp::ThreadPool pool;  // hardware_concurrency() workers, unbounded queue
-
-    auto sum = pool.submit([](int a, int b) { return a + b; }, 20, 22);
-    std::cout << sum.get() << '\n';  // 42
-
-    pool.post([] { std::cout << "fire and forget\n"; });
-
-    pool.waitIdle();  // wait until the queue is empty and all workers are idle
-}   // the destructor shuts the pool down (drains the queue by default)
+tp::ThreadPool pool;                                     // defaults + TP_* env
+auto sum = pool.submit([](int a, int b) { return a + b; }, 2, 3);
+pool.post([] { /* fire and forget */ });
+int five = sum.get();                                    // rethrows task exceptions
+pool.waitIdle();                                         // queue empty, workers idle
+// ~ThreadPool(): shuts down with the configured policy (drain by default)
 ```
-
-[`examples/basic/main.cpp`](examples/basic/main.cpp) has a longer tour.
-[`examples/pusher_demo`](examples/pusher_demo) reproduces the original demo,
-where producer threads push random arithmetic tasks.
 
 ## Integration
 
-The library target is **`tp::thread_pool`** and the public header is
-**`<tp/thread_pool.hpp>`**. `<tp/config.hpp>` comes with it.
-
-### (a) CMake FetchContent
+Link `tp::thread_pool` and include `<tp/thread_pool.hpp>`. Pick one:
 
 ```cmake
+# 1. FetchContent (pin GIT_TAG to a commit or tag)
 include(FetchContent)
-FetchContent_Declare(
-    tp
-    GIT_REPOSITORY https://github.com/TieuBao168/thread-pool-cplusplus.git
-    GIT_TAG        main   # pin a release tag or commit hash for reproducible builds
-)
+FetchContent_Declare(tp GIT_REPOSITORY https://github.com/TieuBao168/thread-pool-cplusplus.git GIT_TAG main)
 FetchContent_MakeAvailable(tp)
 
-target_link_libraries(my_app PRIVATE tp::thread_pool)
-```
-
-Tests, examples, benchmarks and install rules are off by default when `tp` is
-not the top-level project.
-
-### (b) add_subdirectory
-
-```cmake
+# 2. Vendored copy
 add_subdirectory(third_party/thread-pool-cplusplus)
+
+# 3. Installed package:  cmake --install build --prefix /opt/tp
+find_package(tp CONFIG REQUIRED)
+
 target_link_libraries(my_app PRIVATE tp::thread_pool)
 ```
 
-### (c) Install + find_package
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-cmake --install build --prefix /opt/tp
-```
-
-```cmake
-find_package(tp CONFIG REQUIRED)   # add -DCMAKE_PREFIX_PATH=/opt/tp if needed
-target_link_libraries(my_app PRIVATE tp::thread_pool)
-```
+As a subproject, tp builds only the library (no tests, examples or install rules).
 
 ## Configuration
 
-Settings are applied in layers, from lowest to highest priority:
+Priority: **defaults < config file < `TP_*` environment < code**.
 
-```
-built-in defaults  <  config file  <  TP_* environment variables  <  code
-```
-
-### Keys
-
-| Key               | Values                                   | Default       | Environment variable  |
-|-------------------|------------------------------------------|---------------|-----------------------|
-| `num_workers`     | integer; `0` = `hardware_concurrency()`  | `0`           | `TP_NUM_WORKERS`      |
-| `queue_capacity`  | integer; `0` = unbounded                 | `0`           | `TP_QUEUE_CAPACITY`   |
-| `overflow_policy` | `block` \| `reject` \| `caller_runs`     | `block`       | `TP_OVERFLOW_POLICY`  |
-| `shutdown_policy` | `drain` \| `discard`                     | `drain`       | `TP_SHUTDOWN_POLICY`  |
-| `cpu_affinity`    | `none` \| `round_robin` \| list `0,2,4`  | `none`        | `TP_CPU_AFFINITY`     |
-| `thread_name`     | base name; workers get `<name>-<index>`  | `tp-worker`   | `TP_THREAD_NAME`      |
-| `log_level`       | `off` \| `error` \| `warn` \| `info` \| `debug` | `warn` | `TP_LOG_LEVEL`        |
-
-`TP_CONFIG_FILE` names the config file to read when none is given in code.
-Keys and enum values are case-insensitive. Unknown keys and invalid values
-raise `tp::ConfigError`, with `file:line` in the message.
-
-Overflow policies, which apply only when `queue_capacity > 0`:
-
-- `block`: `submit()` and `post()` wait until a slot frees up.
-- `reject`: `submit()` throws `tp::QueueFullError`, `post()` returns `false`.
-- `caller_runs`: the task runs right away on the thread that submitted it.
-
-CPU affinity is best effort. If a thread cannot be pinned, the pool logs a
-warning and keeps running. macOS has no hard pinning API, so affinity is
-ignored there.
-
-### Config file
-
-The format is INI-like. `#` and `;` start comments, section headers are
-accepted and ignored, and every key is optional. A fully commented file is in
-[`config/threadpool.ini.example`](config/threadpool.ini.example):
+| Key | Values | Default | Env override |
+|-----|--------|---------|--------------|
+| `num_workers` | integer, `0` = hardware threads | `0` | `TP_NUM_WORKERS` |
+| `queue_capacity` | integer, `0` = unbounded | `0` | `TP_QUEUE_CAPACITY` |
+| `overflow_policy` | `block` \| `reject` \| `caller_runs` | `block` | `TP_OVERFLOW_POLICY` |
+| `shutdown_policy` | `drain` \| `discard` | `drain` | `TP_SHUTDOWN_POLICY` |
+| `cpu_affinity` | `none` \| `round_robin` \| `0,2,4` | `none` | `TP_CPU_AFFINITY` |
+| `thread_name` | base name, workers get `<name>-<i>` | `tp-worker` | `TP_THREAD_NAME` |
+| `log_level` | `off` \| `error` \| `warn` \| `info` \| `debug` | `warn` | `TP_LOG_LEVEL` |
 
 ```ini
-[thread_pool]
+# threadpool.ini — every key is optional; see config/threadpool.ini.example
 num_workers     = 4
 queue_capacity  = 1024
-overflow_policy = block
-shutdown_policy = drain
-cpu_affinity    = none
-thread_name     = tp-worker
-log_level       = warn
+overflow_policy = reject
 ```
-
-### How the constructors pick up configuration
 
 ```cpp
-tp::ThreadPool pool;                    // Config::load(): $TP_CONFIG_FILE if set (else defaults) + TP_* env
-tp::ThreadPool pool("threadpool.ini");  // Config::load("threadpool.ini") + TP_* env; ConfigError if unusable
-tp::ThreadPool pool(cfg);               // exactly `cfg` (validated; environment NOT applied)
+tp::ThreadPool a;                       // $TP_CONFIG_FILE if set, else defaults; + env
+tp::ThreadPool b("threadpool.ini");     // file + env; throws tp::ConfigError if unusable
+tp::ThreadPool c(tp::Config{}.workers(4).queueCapacity(1000));    // code only
+
+auto cfg = tp::Config::load("threadpool.ini");                    // file + env ...
+cfg.onOverflow(tp::OverflowPolicy::CallerRuns);                   // ... then code wins
+tp::ThreadPool d(cfg);
 ```
 
-With the default constructor, an unset `TP_CONFIG_FILE` is fine. If you name a
-file, in code or through `TP_CONFIG_FILE`, it must exist.
+Errors name the source, e.g. `threadpool.ini:7: unknown key 'num_wrkers'`.
+CPU pinning is best effort (not available on macOS); failures are logged.
+Route logs to your own logger with `Config::logSink(fn)`.
+
+## API
+
+| Member | Behavior |
+|--------|----------|
+| `submit(f, args...)` | Returns `std::future<R>`. Throws `QueueFullError` (reject) or `PoolStoppedError`. |
+| `post(f, args...)` | Returns `false` if refused. Exceptions are logged and counted in `stats().failed`. |
+| `waitIdle()` | Blocks until the queue is empty and no task runs. |
+| `shutdown([policy])` | Stops accepting work, drains or discards, joins workers. Idempotent. |
+| `stats()` | `workers`, `pending`, `active`, `completed`, `failed`, `rejected`. |
+| `size()`, `isRunning()`, `config()` | Worker count, state, effective config. |
+
+All members are thread-safe. Calling `waitIdle()` or `shutdown()` from a task
+throws `std::logic_error` instead of deadlocking. Tasks may submit more tasks.
+
+## Verification
+
+| Check | Scope |
+|-------|-------|
+| Unit tests | 46 tests: 26 config, 20 pool (results, exceptions, all overflow and shutdown policies, nested submit, 2000× create/destroy regression for the old shutdown hang) |
+| Compilers | GCC, Clang, AppleClang, MSVC — Debug and Release, warnings as errors |
+| Sanitizers | ThreadSanitizer, AddressSanitizer + UndefinedBehaviorSanitizer |
+| Integration | A consumer project builds and runs via `find_package`, `add_subdirectory` and `FetchContent` |
+| Container | Docker image builds and runs the tests on `ubuntu:24.04` |
+| Stability | Pool tests repeated 300× locally without a failure |
+
+All of the above runs in [CI](.github/workflows/ci.yml) on every push and pull request.
+
+## Performance
+
+`tp_bench_throughput`: one producer `post()`s N tasks, then `waitIdle()`.
+Median of 3 runs, Release, AMD Ryzen 7 8845HS (8 cores / 16 threads), Windows, MinGW GCC 15.
+
+| Workers | empty task | ~1 µs task | ~50 µs task |
+|--------:|-----------:|-----------:|------------:|
+| 1  | 7.64 M/s | 934 k/s | 19.9 k/s |
+| 2  | 4.03 M/s | 1.69 M/s (1.8×) | 37.2 k/s (1.9×) |
+| 4  | 1.39 M/s | 2.83 M/s (3.0×) | 77.3 k/s (3.9×) |
+| 16 | 0.31 M/s | 385 k/s | 295 k/s (14.8×) |
+
+Linux, GitHub Actions runner (AMD EPYC 9V74, 4 threads), GCC, single run:
+
+| Workers | empty task | ~1 µs task | ~50 µs task |
+|--------:|-----------:|-----------:|------------:|
+| 1 | 4.10 M/s | 931 k/s | 19.9 k/s |
+| 2 | 3.22 M/s | 1.64 M/s (1.8×) | 40.5 k/s (2.0×) |
+| 4 | 1.07 M/s | 2.10 M/s (2.3×) | 78.0 k/s (3.9×) |
+
+What this shows: tasks of ~50 µs scale almost linearly on both platforms.
+Tiny tasks are limited by the single shared queue mutex, so more workers add
+contention. Give each task at least a few microseconds of work, or batch small
+items into one task. Every CI run republishes these numbers in the `benchmark`
+job summary.
+
+Reproduce: `make bench`, or `./build/tp_bench_throughput [num_tasks]`.
+
+## Build from source
 
 ```bash
-TP_CONFIG_FILE=/etc/myapp/threadpool.ini TP_NUM_WORKERS=8 ./my_app
-```
-
-### Configuration in code
-
-```cpp
-tp::Config cfg = tp::Config{}
-                     .workers(4)
-                     .queueCapacity(1000)
-                     .onOverflow(tp::OverflowPolicy::Reject)
-                     .onShutdown(tp::ShutdownPolicy::Discard)
-                     .pinRoundRobin()          // or .pinTo({0, 2, 4})
-                     .threadName("io")
-                     .logLevel(tp::LogLevel::Info);
-tp::ThreadPool pool(cfg);
-```
-
-To keep code as the top layer while still honouring a file and the environment,
-load first and then override:
-
-```cpp
-tp::Config cfg = tp::Config::load("threadpool.ini");  // defaults < file < env
-cfg.queueCapacity(256);                                // code wins
-tp::ThreadPool pool(cfg);
-```
-
-Other helpers: `Config::fromFile(path)`, `Config::fromString(text)`,
-`cfg.set("num_workers", "8")`, `cfg.applyEnv()`, `cfg.validate()` and
-`cfg.resolvedWorkers()`. Non-fatal parse notes, such as deprecated keys, are
-collected in `cfg.warnings`. `tp::toString()` turns any enum back into its
-config-file spelling.
-
-### Custom log sink
-
-By default, library messages at or above `log_level` go to `stderr`. To route
-them elsewhere, set a sink. It may be called from any thread, so it must be
-thread-safe.
-
-```cpp
-auto cfg = tp::Config{}.logLevel(tp::LogLevel::Info).logSink(
-    [](tp::LogLevel level, const std::string& msg) {
-        my_logger.log(tp::toString(level), msg);
-    });
-```
-
-## API reference
-
-All members are thread-safe. `waitIdle()` and `shutdown()` throw
-`std::logic_error` when called from one of the pool's own workers.
-
-| Member | Description |
-|--------|-------------|
-| `ThreadPool()` | Uses `Config::load()`: `$TP_CONFIG_FILE` if set, else defaults, plus `TP_*` env. |
-| `explicit ThreadPool(const std::string& file)` | Uses `Config::load(file)`. Throws `ConfigError` if the file is unusable. |
-| `explicit ThreadPool(Config cfg)` | Uses `cfg` as given (validated; the environment is not applied). |
-| `~ThreadPool()` | Calls `shutdown()` with the configured shutdown policy. |
-| `submit(f, args...) -> std::future<R>` | Queues `f(args...)`. Arguments are copied or moved in; use `std::ref` to pass a reference. Exceptions from the task are rethrown by `future::get()`. Throws `QueueFullError` (with `reject`) or `PoolStoppedError`. |
-| `post(f, args...) -> bool` | Queues `f(args...)` without a future. Returns `false` if the task was refused (queue full with `reject`, or pool stopped). Exceptions from the task are logged and counted in `Stats::failed`. |
-| `waitIdle()` | Blocks until the queue is empty and no task is running. |
-| `shutdown()` / `shutdown(ShutdownPolicy)` | Stops accepting tasks, then drains or discards the queue and joins the workers. Idempotent. |
-| `isRunning() -> bool` | `false` once shutdown has started. |
-| `size() -> std::size_t` | Number of worker threads. |
-| `stats() -> Stats` | Snapshot of `workers`, `pending`, `active`, `completed`, `failed`, `rejected`. |
-| `config() -> const Config&` | The effective configuration. |
-
-| Exception | Thrown when |
-|-----------|-------------|
-| `tp::QueueFullError` | `submit()` finds a full queue under `OverflowPolicy::Reject`. |
-| `tp::PoolStoppedError` | `submit()` is called after `shutdown()` has started. |
-| `tp::ConfigError` | A config file cannot be opened, or a key or value is invalid. |
-
-All three derive from `std::runtime_error`.
-
-## Building from source
-
-Requirements: CMake 3.16 or newer and a C++17 compiler (GCC, Clang or MSVC).
-
-```bash
-cmake -S . -B build
-cmake --build build
+cmake -S . -B build -DTP_WARNINGS_AS_ERRORS=ON
+cmake --build build --parallel
 ctest --test-dir build --output-on-failure
+cd build && ./tp_pusher_demo threadpool.ini 2 5   # demo: config, producers, seconds
 ```
 
-| CMake option | Default (top level) | Meaning |
-|--------------|---------------------|---------|
-| `TP_BUILD_TESTS` | `ON` | Build the unit tests (`ctest`). |
-| `TP_BUILD_EXAMPLES` | `ON` | Build `tp_example_basic` and `tp_pusher_demo`. |
-| `TP_BUILD_BENCHMARKS` | `ON` | Build `tp_bench_throughput`. |
-| `TP_INSTALL` | `ON` | Generate install rules and the `tp` CMake package. |
-| `TP_WARNINGS_AS_ERRORS` | `OFF` | Add `-Werror` or `/WX`. |
-| `BUILD_SHARED_LIBS` | `OFF` | Build a shared library instead of a static one. |
-
-When `tp` is consumed as a subproject, the first four options default to `OFF`.
-
-### make wrapper
-
-A thin `Makefile` wraps the CMake commands:
-
-| Target | Action |
-|--------|--------|
-| `make` / `make all` | Configure and build into `build/`. |
-| `make test` | Build, then run `ctest`. |
-| `make run` | Run the pusher demo (`RUN_ARGS="threadpool.ini 2 5"`). |
-| `make bench` | Run the throughput benchmark. |
-| `make install PREFIX=/opt/tp` | Install headers, library and CMake package. |
-| `make clean` | Remove the build directory. |
-
-Variables: `BUILD_TYPE` (Release/Debug), `BUILD_DIR`, `GENERATOR`, `JOBS`,
-`CMAKE_ARGS`.
-
-### Running the programs
-
-```bash
-./build/tp_example_basic
-./build/tp_pusher_demo [config_file] [num_pushers] [seconds]   # defaults: threadpool.ini 1 10
-./build/tp_bench_throughput [num_tasks]                         # default 200000
-```
-
-The build copies `config/threadpool.ini.example` next to `tp_pusher_demo` as
-`threadpool.ini`. If the file is missing, the demo falls back to the built-in
-defaults.
-
-### Docker
-
-The image builds the project with warnings as errors, runs the tests, and then
-runs the pusher demo:
-
-```bash
-docker build -t tp-thread-pool .
-docker run --rm tp-thread-pool
-```
-
-## Project layout
+Options: `TP_BUILD_TESTS`, `TP_BUILD_EXAMPLES`, `TP_BUILD_BENCHMARKS`, `TP_INSTALL`
+(on when top-level), `TP_WARNINGS_AS_ERRORS`, `BUILD_SHARED_LIBS`.
+`make` / `make test` / `make bench` / `make install PREFIX=...` wrap the same steps.
 
 ```
-.
-├── include/tp/
-│   ├── config.hpp            # tp::Config, policies, ConfigError, toString()
-│   └── thread_pool.hpp       # tp::ThreadPool, Stats, QueueFullError, PoolStoppedError
-├── src/
-│   ├── config.cpp            # parsing, env overrides, validation
-│   ├── thread_pool.cpp       # queue, workers, shutdown
-│   └── platform.hpp/.cpp     # thread naming and CPU pinning per OS
-├── examples/
-│   ├── basic/                # API tour
-│   └── pusher_demo/          # producer threads + random arithmetic tasks
-├── benchmarks/
-│   └── bench_throughput.cpp  # tasks/sec for several worker counts and task sizes
-├── tests/                    # unit tests + an install/find_package consumer project
-├── config/
-│   └── threadpool.ini.example
-├── cmake/
-│   └── tpConfig.cmake.in     # package config for find_package(tp)
-├── CMakeLists.txt
-├── CMakePresets.json
-├── Makefile                  # convenience wrapper around CMake
-├── Dockerfile
-└── uml/componentDiagram.plantuml
+include/tp/   public headers (config.hpp, thread_pool.hpp)
+src/          implementation and per-OS helpers
+tests/        unit tests and the consumer project used by CI
+examples/     basic usage, pusher_demo (the original demo)
+benchmarks/   throughput benchmark
+config/       threadpool.ini.example
 ```
 
-## Migrating from the legacy API
+## Migrating from the old API
 
-Before this rewrite, the project was a demo with a global-style `ThreadPool`
-that started its own "task pusher" threads. The old API maps to the new one as
-follows:
-
-| Legacy | New |
-|--------|-----|
-| `#include "thread_pool.hpp"` | `#include <tp/thread_pool.hpp>`, link `tp::thread_pool` |
-| `ThreadPool pool; pool.initialize("file")` | `tp::ThreadPool pool("file");` (throws `tp::ConfigError` instead of returning `false`) |
-| `pool.pushTask(static_cast<void*>(new TaskData(f, args...)))` | `pool.post(f, args...);` (no raw pointers; the pool owns the task) |
-| `TaskData` / `callBackFunc` | Any callable: lambda, function, functor, or move-only type |
-| No way to get a result | `auto fut = pool.submit(f, args...); fut.get();` |
-| `std::this_thread::sleep_for(...)` to wait for tasks | `pool.waitIdle();` |
-| `getNumWorkers()` | `pool.size()` |
-| `NUMS_OF_WORKER 3` | `num_workers = 3` |
-| `NUMS_OF_TASK_PUSHER 2` | Removed: producers are your application's threads (see `examples/pusher_demo`) |
-| `ConfigLoader::getInstance().initialize("file")` | `tp::Config::load("file")` (a value, not a global singleton) |
-| `getValue<int>("worker_count", 1)` | `cfg.num_workers` (typed fields, validated on load) |
-| `worker_count = 3` / `queue_size = 200` | `num_workers = 3` / `queue_capacity = 200` |
-| `task_pusher_count`, `lifecycle_timeout` | Demo arguments: `tp_pusher_demo <config> <pushers> <seconds>` |
-| `dynamic_sizing`, `enable_monitoring` | Not supported yet; `pool.stats()` covers basic monitoring |
-
-Legacy config files still load. `NUMS_OF_WORKER` and `worker_count` are read
-as `num_workers`, and `queue_size` as `queue_capacity`, each with a deprecation
-warning. `NUMS_OF_TASK_PUSHER`, `task_pusher_count`, `dynamic_sizing`,
-`lifecycle_timeout` and `enable_monitoring` are ignored with a warning,
-because the pool no longer creates producer threads. The arithmetic tasks
-(`CommonTask`) now live in `examples/pusher_demo/common_task.hpp`, in
-namespace `demo`.
+| Old | New |
+|-----|-----|
+| `pool.initialize("file")` / `ConfigLoader` | `tp::ThreadPool pool("file")` / `tp::Config::load("file")` |
+| `pushTask(new TaskData(f, args...))` | `pool.post(f, args...)` or `pool.submit(...)` |
+| `sleep_for(...)` to wait for tasks | `pool.waitIdle()` |
+| `NUMS_OF_WORKER`, `worker_count`, `queue_size` | still read, with a deprecation warning |
+| task pushers, `lifecycle_timeout` | application code; see `examples/pusher_demo` |
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).
