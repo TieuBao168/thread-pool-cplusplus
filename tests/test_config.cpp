@@ -288,6 +288,27 @@ TP_TEST("legacy format") {
     TP_CHECK_THROWS(Config::fromString("NUMS_OF_WORKER\n"), ConfigError);
 }
 
+TP_TEST("ConfigLoader-era keys") {
+    const Config c = Config::fromString(
+        "task_pusher_count = 2   # producers\n"
+        "worker_count      = 3\n"
+        "queue_size        = 200\n"
+        "dynamic_sizing    = true\n"
+        "lifecycle_timeout = 10\n"
+        "enable_monitoring = true\n",
+        "thread_pool_config.txt");
+    TP_CHECK_EQ(c.num_workers, 3u);
+    TP_CHECK_EQ(c.queue_capacity, 200u);
+    TP_CHECK_EQ(c.warnings.size(), 6u);
+    if (c.warnings.size() == 6) {
+        TP_CHECK(contains(c.warnings[1], "thread_pool_config.txt:2:"));
+        TP_CHECK(contains(c.warnings[1], "num_workers"));
+        TP_CHECK(contains(c.warnings[2], "queue_capacity"));
+        TP_CHECK(contains(c.warnings[3], "ignored"));
+    }
+    TP_CHECK_THROWS(Config::fromString("worker_count = -1\n"), ConfigError);
+}
+
 TP_TEST("whitespace form only for legacy keys") {
     const std::string msg = errorOf([] { Config::fromString("num_workers 4\n", "f.ini"); });
     TP_CHECK(contains(msg, "f.ini:1:"));

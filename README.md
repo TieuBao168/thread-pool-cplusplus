@@ -309,7 +309,7 @@ docker run --rm tp-thread-pool
 ├── CMakePresets.json
 ├── Makefile                  # convenience wrapper around CMake
 ├── Dockerfile
-└── componentDiagram.plantuml
+└── uml/componentDiagram.plantuml
 ```
 
 ## Migrating from the legacy API
@@ -329,9 +329,16 @@ follows:
 | `getNumWorkers()` | `pool.size()` |
 | `NUMS_OF_WORKER 3` | `num_workers = 3` |
 | `NUMS_OF_TASK_PUSHER 2` | Removed: producers are your application's threads (see `examples/pusher_demo`) |
+| `ConfigLoader::getInstance().initialize("file")` | `tp::Config::load("file")` (a value, not a global singleton) |
+| `getValue<int>("worker_count", 1)` | `cfg.num_workers` (typed fields, validated on load) |
+| `worker_count = 3` / `queue_size = 200` | `num_workers = 3` / `queue_capacity = 200` |
+| `task_pusher_count`, `lifecycle_timeout` | Demo arguments: `tp_pusher_demo <config> <pushers> <seconds>` |
+| `dynamic_sizing`, `enable_monitoring` | Not supported yet; `pool.stats()` covers basic monitoring |
 
-Legacy config files still load. `NUMS_OF_WORKER` is read as `num_workers` with
-a deprecation warning. `NUMS_OF_TASK_PUSHER` is ignored with a warning,
+Legacy config files still load. `NUMS_OF_WORKER` and `worker_count` are read
+as `num_workers`, and `queue_size` as `queue_capacity`, each with a deprecation
+warning. `NUMS_OF_TASK_PUSHER`, `task_pusher_count`, `dynamic_sizing`,
+`lifecycle_timeout` and `enable_monitoring` are ignored with a warning,
 because the pool no longer creates producer threads. The arithmetic tasks
 (`CommonTask`) now live in `examples/pusher_demo/common_task.hpp`, in
 namespace `demo`.

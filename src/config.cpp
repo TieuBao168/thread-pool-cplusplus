@@ -126,6 +126,15 @@ void applyKey(Config& c, const std::string& rawKey, const std::string& rawValue,
         c.warnings.push_back(ctx + "'NUMS_OF_WORKER' is deprecated, use 'num_workers' instead");
     } else if (key == "nums_of_task_pusher") {  // legacy, no longer meaningful
         c.warnings.push_back(ctx + "'NUMS_OF_TASK_PUSHER' is obsolete and ignored");
+    } else if (key == "worker_count") {  // ConfigLoader-era names
+        c.num_workers = parseSize(ctx, key, value);
+        c.warnings.push_back(ctx + "'worker_count' is deprecated, use 'num_workers' instead");
+    } else if (key == "queue_size") {
+        c.queue_capacity = parseSize(ctx, key, value);
+        c.warnings.push_back(ctx + "'queue_size' is deprecated, use 'queue_capacity' instead");
+    } else if (key == "task_pusher_count" || key == "dynamic_sizing" || key == "lifecycle_timeout" ||
+               key == "enable_monitoring") {
+        c.warnings.push_back(ctx + "'" + key + "' is not supported by tp::ThreadPool and is ignored");
     } else {
         throw ConfigError(ctx + "unknown key '" + trim(rawKey) + "'");
     }

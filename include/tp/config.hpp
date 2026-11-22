@@ -61,7 +61,10 @@ public:
  *
  * Keys and enum values are case-insensitive. The legacy format
  * `NUMS_OF_WORKER 3` is still read (with a warning); `NUMS_OF_TASK_PUSHER`
- * is ignored with a warning.
+ * is ignored with a warning. The ConfigLoader-era keys `worker_count` and
+ * `queue_size` map to num_workers / queue_capacity (with a warning), while
+ * `task_pusher_count`, `dynamic_sizing`, `lifecycle_timeout` and
+ * `enable_monitoring` are ignored with a warning.
  *
  * Environment overrides use the upper-cased key with a `TP_` prefix,
  * e.g. `TP_NUM_WORKERS=8`. `TP_CONFIG_FILE` names the file load() reads.
