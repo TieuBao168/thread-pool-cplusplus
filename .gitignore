@@ -30,3 +30,12 @@
 *.exe
 *.out
 *.app
+
+# Build / tooling output
+build/
+out/
+install/
+.vscode/
+.cache/
+CMakeUserPresets.json
+compile_commands.json

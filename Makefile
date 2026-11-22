@@ -1,63 +1,64 @@
-.PHONY: all build directories clean rebuild run help
+# Thin convenience wrapper around CMake. The real build lives in CMakeLists.txt.
+#
+#   make                 configure + build into $(BUILD_DIR)
+#   make test            run the unit tests
+#   make run             run the pusher demo
+#   make install PREFIX=/opt/tp
 
-CXX := g++
-CXXFLAGS := -Wall -Wextra -std=c++17 -pthread -O2 -MMD -MP
-LDFLAGS := -pthread
+BUILD_TYPE ?= Release
+BUILD_DIR  ?= build
+PREFIX     ?= /usr/local
+GENERATOR  ?=
+CMAKE      ?= cmake
+CTEST      ?= ctest
+JOBS       ?= 4
+CMAKE_ARGS ?=
 
-SRC_DIR := src
-INCLUDE_DIRS := include
-BUILD_DIR := build
-OBJ_DIR := $(BUILD_DIR)/obj
-DEP_DIR := $(BUILD_DIR)/dep
-BIN_DIR := bin
-BIN_NAME := thread_pool_binary
+# Pusher demo arguments: [config_file] [num_pushers] [seconds]
+RUN_ARGS   ?= threadpool.ini 2 5
 
-CXXFLAGS += $(foreach dir,$(shell find $(INCLUDE_DIRS) -type d),-I$(dir))
+ifneq ($(strip $(GENERATOR)),)
+GENERATOR_FLAG := -G "$(GENERATOR)"
+endif
 
-SRCS := $(filter-out $(SRC_DIR)/main.cpp, $(shell find $(SRC_DIR) -name "*.cpp"))
-MAIN_SRC := $(SRC_DIR)/main.cpp
+.PHONY: all configure build test run bench install clean rebuild help
 
-OBJS := $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(SRCS)))
-DEPS := $(patsubst %.cpp,$(DEP_DIR)/%.d,$(notdir $(SRCS)))
-MAIN_OBJ := $(OBJ_DIR)/main.o
-MAIN_DEP := $(DEP_DIR)/main.d
+all: build
 
-TARGET := $(BIN_DIR)/$(BIN_NAME)
+configure:
+	$(CMAKE) -S . -B $(BUILD_DIR) $(GENERATOR_FLAG) -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) $(CMAKE_ARGS)
 
-all: directories $(TARGET)
+build: configure
+	$(CMAKE) --build $(BUILD_DIR) --config $(BUILD_TYPE) --parallel $(JOBS)
 
-directories:
-	mkdir -p $(OBJ_DIR) $(DEP_DIR) $(BIN_DIR)
+test: build
+	$(CTEST) --test-dir $(BUILD_DIR) -C $(BUILD_TYPE) --output-on-failure
 
-$(OBJ_DIR)/%.o: $(SRC_DIR)/*/%.cpp | directories
-	$(CXX) $(CXXFLAGS) -c $< -o $@
-	@mv $(@:.o=.d) $(DEP_DIR)/$(notdir $(@:.o=.d))
+run: build
+	cd $(BUILD_DIR) && ./tp_pusher_demo $(RUN_ARGS)
 
-$(MAIN_OBJ): $(MAIN_SRC) | directories
-	$(CXX) $(CXXFLAGS) -c $< -o $@
-	@mv $(@:.o=.d) $(MAIN_DEP)
+bench: build
+	cd $(BUILD_DIR) && ./tp_bench_throughput
 
-$(TARGET): $(OBJS) $(MAIN_OBJ)
-	@echo "Linking..."
-	@$(CXX) $(OBJS) $(MAIN_OBJ) $(LDFLAGS) -o $@ && \
-	 (echo ":> Build complete! -> $(TARGET)" && exit 0) || \
-	 (echo ":< Build failed!" && exit 1)
-
--include $(DEPS) $(MAIN_DEP)
+install: build
+	$(CMAKE) --install $(BUILD_DIR) --config $(BUILD_TYPE) --prefix "$(PREFIX)"
 
 clean:
-	find $(OBJ_DIR) -type f ! -name '.gitkeep' -delete
-	find $(DEP_DIR) -type f ! -name '.gitkeep' -delete
-	rm -f $(TARGET)
+	rm -rf $(BUILD_DIR)
 
 rebuild: clean all
 
-run: all
-	./$(TARGET)
-
 help:
-	@echo "Usage:"
-	@echo "  make all       - Build the project"
-	@echo "  make clean     - Remove build files (preserve .gitkeep)"
-	@echo "  make rebuild   - Clean and rebuild"
-	@echo "  make run       - Run the executable"
+	@echo "Usage: make [target] [BUILD_TYPE=Release|Debug] [BUILD_DIR=build]"
+	@echo ""
+	@echo "Targets:"
+	@echo "  all      - Configure and build (default)"
+	@echo "  test     - Build and run the unit tests (ctest)"
+	@echo "  run      - Build and run the pusher demo (RUN_ARGS='$(RUN_ARGS)')"
+	@echo "  bench    - Build and run the throughput benchmark"
+	@echo "  install  - Install headers, library and CMake package to PREFIX ($(PREFIX))"
+	@echo "  clean    - Remove $(BUILD_DIR)/"
+	@echo "  rebuild  - clean + all"
+	@echo "  help     - Show this message"
+	@echo ""
+	@echo "Variables: GENERATOR (e.g. Ninja), CMAKE_ARGS (extra -D flags), JOBS"
