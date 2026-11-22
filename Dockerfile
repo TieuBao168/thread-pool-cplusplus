@@ -1,26 +1,24 @@
-FROM ubuntu:24.10
+FROM ubuntu:24.04
 
-# Install necessary build tools and dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    g++ \
-    make \
-    && apt-get clean \
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        ninja-build \
     && rm -rf /var/lib/apt/lists/*
 
-# Create a directory project
 WORKDIR /app
-
-# Copy your project files
 COPY . .
 
-# This will create the binary in the build folder
-RUN make 2>&1 | tee build.log
+# Configure, build and run the unit tests; any failure fails the image build.
+RUN cmake -S /app -B /build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DTP_WARNINGS_AS_ERRORS=ON \
+    && cmake --build /build --parallel \
+    && ctest --test-dir /build --output-on-failure
 
-# Set the working directory to the build folder
-WORKDIR /app/build
+# Build tree lives outside /app so a host build/ dir copied in can't clash.
+WORKDIR /build
 
-# Set the entry point command
-CMD ["sh", "-c", "./thread_pool_binary 2>&1 | tee run.log && cp run.log /app/"]
-# Or use bash as entry point:
-# CMD ["/bin/bash"]
+# Run the pusher demo for a few seconds: [config_file] [num_pushers] [seconds]
+CMD ["./tp_pusher_demo", "threadpool.ini", "2", "5"]
