@@ -34,11 +34,15 @@ build: configure
 test: build
 	$(CTEST) --test-dir $(BUILD_DIR) -C $(BUILD_TYPE) --output-on-failure
 
+# Multi-config generators (Visual Studio, Ninja Multi-Config) put binaries in
+# $(BUILD_DIR)/$(BUILD_TYPE). Recursive '=' resolves this after the build ran.
+BIN_DIR = $(if $(wildcard $(BUILD_DIR)/$(BUILD_TYPE)/.),$(BUILD_DIR)/$(BUILD_TYPE),$(BUILD_DIR))
+
 run: build
-	cd $(BUILD_DIR) && ./tp_pusher_demo $(RUN_ARGS)
+	cd $(BIN_DIR) && ./tp_pusher_demo $(RUN_ARGS)
 
 bench: build
-	cd $(BUILD_DIR) && ./tp_bench_throughput
+	cd $(BIN_DIR) && ./tp_bench_throughput
 
 install: build
 	$(CMAKE) --install $(BUILD_DIR) --config $(BUILD_TYPE) --prefix "$(PREFIX)"
