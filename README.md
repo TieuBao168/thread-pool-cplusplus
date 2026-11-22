@@ -63,9 +63,9 @@ pool.waitIdle();                                         // queue empty, workers
 Link `tp::thread_pool` and include `<tp/thread_pool.hpp>`. Pick one:
 
 ```cmake
-# 1. FetchContent (pin GIT_TAG to a commit or tag)
+# 1. FetchContent, pinned to a release tag (see CHANGELOG.md)
 include(FetchContent)
-FetchContent_Declare(tp GIT_REPOSITORY https://github.com/TieuBao168/thread-pool-cplusplus.git GIT_TAG main)
+FetchContent_Declare(tp GIT_REPOSITORY https://github.com/TieuBao168/thread-pool-cplusplus.git GIT_TAG v1.1.0)
 FetchContent_MakeAvailable(tp)
 
 # 2. Vendored copy
@@ -120,7 +120,10 @@ Route logs to your own logger with `Config::logSink(fn)`.
 |--------|----------|
 | `submit(f, args...)` | Returns `std::future<R>`. Throws `QueueFullError` (reject) or `PoolStoppedError`. |
 | `post(f, args...)` | Returns `false` if refused. Exceptions are logged and counted in `stats().failed`. |
+| `tryPost(f, ...)`, `trySubmit(f, ...)` | Never block or throw: `false` / `std::nullopt` if the queue is full or the pool is stopped. Ignore the overflow policy. |
+| `tryPostFor(timeout, f, ...)`, `trySubmitFor(timeout, f, ...)` | Same, but wait up to `timeout` for a free slot. |
 | `waitIdle()` | Blocks until the queue is empty and no task runs. |
+| `waitIdleFor(timeout)` | Same with a limit; returns `true` if idle in time. |
 | `shutdown([policy])` | Stops accepting work, drains or discards, joins workers. Idempotent. |
 | `stats()` | `workers`, `pending`, `active`, `completed`, `failed`, `rejected`. |
 | `size()`, `isRunning()`, `config()` | Worker count, state, effective config. |
@@ -132,7 +135,7 @@ throws `std::logic_error` instead of deadlocking. Tasks may submit more tasks.
 
 | Check | Scope |
 |-------|-------|
-| Unit tests | 49 tests: 26 config, 23 pool (results, exceptions, all overflow and shutdown policies, nested submit, 2000× create/destroy regression for the old shutdown hang) |
+| Unit tests | 53 tests: 26 config, 27 pool (results, exceptions, all overflow and shutdown policies, timeouts, nested submit, 2000× create/destroy regression for the old shutdown hang) |
 | Compilers | GCC, Clang, AppleClang, MSVC — Debug and Release, warnings as errors |
 | Sanitizers | ThreadSanitizer, AddressSanitizer + UndefinedBehaviorSanitizer |
 | Integration | A consumer project builds and runs via `find_package`, `add_subdirectory` and `FetchContent` |
