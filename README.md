@@ -132,7 +132,7 @@ throws `std::logic_error` instead of deadlocking. Tasks may submit more tasks.
 
 | Check | Scope |
 |-------|-------|
-| Unit tests | 46 tests: 26 config, 20 pool (results, exceptions, all overflow and shutdown policies, nested submit, 2000× create/destroy regression for the old shutdown hang) |
+| Unit tests | 49 tests: 26 config, 23 pool (results, exceptions, all overflow and shutdown policies, nested submit, 2000× create/destroy regression for the old shutdown hang) |
 | Compilers | GCC, Clang, AppleClang, MSVC — Debug and Release, warnings as errors |
 | Sanitizers | ThreadSanitizer, AddressSanitizer + UndefinedBehaviorSanitizer |
 | Integration | A consumer project builds and runs via `find_package`, `add_subdirectory` and `FetchContent` |
@@ -198,7 +198,8 @@ config/       threadpool.ini.example
 | `pool.initialize("file")` / `ConfigLoader` | `tp::ThreadPool pool("file")` / `tp::Config::load("file")` |
 | `pushTask(new TaskData(f, args...))` | `pool.post(f, args...)` or `pool.submit(...)` |
 | `sleep_for(...)` to wait for tasks | `pool.waitIdle()` |
-| `NUMS_OF_WORKER`, `worker_count`, `queue_size` | still read, with a deprecation warning |
+| `NUMS_OF_WORKER`, `worker_count`, `queue_size` | still read, with a deprecation warning (worker counts must be > 0, as before) |
+| unknown keys were silently ignored | now a `ConfigError` with `file:line`, so typos are caught |
 | task pushers, `lifecycle_timeout` | application code; see `examples/pusher_demo` |
 
 ## License

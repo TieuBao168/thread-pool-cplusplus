@@ -70,8 +70,12 @@ ThreadPool::Enqueued ThreadPool::enqueue(detail::Task&& task) {
                 ++rejected_;
                 return Enqueued::Rejected;
             case OverflowPolicy::CallerRuns:
+                ++active_;  // keeps waitIdle() waiting for the inline task
                 lock.unlock();
                 runTask(task);
+                lock.lock();
+                --active_;
+                if (active_ == 0 && queue_.empty()) idle_.notify_all();
                 return Enqueued::RanInline;
             case OverflowPolicy::Block:
                 ++blockedProducers_;

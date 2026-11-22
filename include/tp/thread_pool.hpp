@@ -36,10 +36,11 @@ public:
 
 /// A point-in-time snapshot of pool counters.
 struct Stats {
-    std::size_t workers = 0;     ///< worker threads
+    std::size_t workers = 0;     ///< worker threads started (unchanged by shutdown)
     std::size_t pending = 0;     ///< tasks waiting in the queue
-    std::size_t active = 0;      ///< tasks running right now
-    std::uint64_t completed = 0; ///< tasks that returned normally
+    std::size_t active = 0;      ///< tasks running right now (workers + caller_runs)
+    std::uint64_t completed = 0; ///< tasks that ran; a submit() task that threw counts
+                                 ///< here, its exception goes to the future
     std::uint64_t failed = 0;    ///< post() tasks that threw
     std::uint64_t rejected = 0;  ///< tasks refused (queue full or stopped)
 };
@@ -102,7 +103,9 @@ public:
     ThreadPool();
     /// Config::load(configFile). Throws ConfigError if the file is unusable.
     explicit ThreadPool(const std::string& configFile);
-    explicit ThreadPool(const char* configFile) : ThreadPool(std::string(configFile)) {}
+    /// A null pointer behaves like the default constructor.
+    explicit ThreadPool(const char* configFile)
+        : ThreadPool(Config::load(configFile ? configFile : "")) {}
     /// Uses `config` as given (validated, env is NOT applied).
     explicit ThreadPool(Config config);
 
@@ -130,7 +133,9 @@ public:
     template <class F, class... Args>
     bool post(F&& f, Args&&... args);
 
-    /// Blocks until the queue is empty and no task is running.
+    /// Blocks until the queue is empty and no task is running, including
+    /// tasks run inline by caller_runs. Producers still blocked on a full
+    /// queue have not queued their task yet and are not waited for.
     void waitIdle();
 
     /// Stops accepting tasks and joins the workers. Idempotent.
@@ -138,6 +143,7 @@ public:
     void shutdown(ShutdownPolicy policy);
 
     bool isRunning() const noexcept;
+    /// Number of worker threads started; unchanged by shutdown() (see isRunning()).
     std::size_t size() const noexcept { return workers_.size(); }
     Stats stats() const;
     const Config& config() const noexcept { return config_; }
@@ -180,10 +186,12 @@ private:
 
 template <class F, class... Args>
 auto ThreadPool::bind(F&& f, Args&&... args) {
+    // Same semantics as std::async: decay-copy everything and invoke once with
+    // rvalues, so the call matches invoke_result_t<decay_t<F>, decay_t<Args>...>
+    // (std::reference_wrapper arguments are passed through, not unwrapped).
     return [fn = std::forward<F>(f),
-            tup = std::make_tuple(std::forward<Args>(args)...)]() mutable -> decltype(auto) {
-        return std::apply(fn, std::move(tup));
-    };
+            tup = std::tuple<std::decay_t<Args>...>(std::forward<Args>(args)...)]() mutable
+           -> decltype(auto) { return std::apply(std::move(fn), std::move(tup)); };
 }
 
 template <class F, class... Args>

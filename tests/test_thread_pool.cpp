@@ -154,6 +154,44 @@ TP_TEST("bounded queue: CallerRuns executes on the caller") {
     gate.open();
 }
 
+TP_TEST("waitIdle waits for a caller_runs task") {
+    Gate workerGate, inlineGate;
+    std::promise<void> workerStarted, inlineStarted;
+    std::atomic<bool> inlineDone{false};
+    tp::ThreadPool pool(quiet(1).queueCapacity(1).onOverflow(tp::OverflowPolicy::CallerRuns));
+    pool.post([&] { workerStarted.set_value(); workerGate.wait(); });
+    workerStarted.get_future().wait();
+    pool.post([] {});  // queue full: the next post runs inline
+    std::thread producer([&] {
+        pool.post([&] { inlineStarted.set_value(); inlineGate.wait(); inlineDone = true; });
+    });
+    inlineStarted.get_future().wait();
+    workerGate.open();  // workers drain; only the inline task is still running
+
+    auto idle = std::async(std::launch::async, [&] { pool.waitIdle(); });
+    TP_CHECK(idle.wait_for(50ms) == std::future_status::timeout);
+    inlineGate.open();
+    idle.get();
+    TP_CHECK(inlineDone.load());
+    producer.join();
+}
+
+TP_TEST("submit with std::ref matches std::async semantics") {
+    tp::ThreadPool pool(quiet(1));
+    int i = 4;
+    auto f = pool.submit([](auto x) { return x; }, std::ref(i));  // R = reference_wrapper<int>
+    TP_CHECK_EQ(f.get().get(), 4);
+    auto g = pool.submit([](int& x) { return ++x; }, std::ref(i));
+    TP_CHECK_EQ(g.get(), 5);
+    TP_CHECK_EQ(i, 5);
+}
+
+TP_TEST("const char* constructor accepts nullptr") {
+    const char* none = nullptr;
+    tp::ThreadPool pool(none);  // same as the default constructor
+    TP_CHECK(pool.size() >= 1u);
+}
+
 TP_TEST("bounded queue: Block waits for space") {
     tp::ThreadPool pool(quiet(2).queueCapacity(4).onOverflow(tp::OverflowPolicy::Block));
     std::atomic<int> done{0};
