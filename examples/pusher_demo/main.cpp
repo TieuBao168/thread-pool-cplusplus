@@ -32,10 +32,11 @@ bool fileExists(const std::string& path) {
     return f.good();
 }
 
-unsigned long parseCount(const char* text, const char* what) {
+unsigned long parseCount(const char* text, const char* what, unsigned long max) {
     char* end = nullptr;
-    unsigned long value = std::strtoul(text, &end, 10);
-    if (end == text || *end != '\0' || value == 0) {
+    // strtoul silently wraps "-1" to ULONG_MAX, so reject a sign up front.
+    unsigned long value = text[0] == '-' ? 0 : std::strtoul(text, &end, 10);
+    if (end == text || end == nullptr || *end != '\0' || value == 0 || value > max) {
         throw std::invalid_argument(std::string("invalid ") + what + ": '" + text + "'");
     }
     return value;
@@ -75,13 +76,14 @@ void printConfig(const tp::ThreadPool& pool) {
 
 int main(int argc, char** argv) {
     std::string configFile = "threadpool.ini";
+    const bool explicitConfig = argc > 1;
     unsigned long numPushers = 1;
     unsigned long seconds = 10;
 
     try {
         if (argc > 1) configFile = argv[1];
-        if (argc > 2) numPushers = parseCount(argv[2], "num_pushers");
-        if (argc > 3) seconds = parseCount(argv[3], "seconds");
+        if (argc > 2) numPushers = parseCount(argv[2], "num_pushers (1-1024)", 1024);
+        if (argc > 3) seconds = parseCount(argv[3], "seconds (1-86400)", 86400);
     } catch (const std::exception& e) {
         std::cerr << "error: " << e.what() << '\n'
                   << "usage: " << argv[0] << " [config_file] [num_pushers] [seconds]\n";
@@ -92,7 +94,9 @@ int main(int argc, char** argv) {
 
     std::unique_ptr<tp::ThreadPool> pool;
     try {
-        if (fileExists(configFile)) {
+        // Only the built-in default may be missing; a path the user typed must
+        // exist, so ThreadPool(configFile) reports the ConfigError.
+        if (explicitConfig || fileExists(configFile)) {
             std::cout << "Loading config from '" << configFile << "'\n";
             pool = std::make_unique<tp::ThreadPool>(configFile);
         } else {
