@@ -117,6 +117,29 @@ jobs:
           cmake --build consumer-fetch --parallel
           ./consumer-fetch/consumer
 
+  benchmark:
+    name: benchmark (Linux, Release)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DTP_BUILD_TESTS=OFF -DTP_BUILD_EXAMPLES=OFF
+          cmake --build build --parallel
+
+      - name: Run and publish to job summary
+        shell: bash  # explicit bash enables pipefail, so a crash is not hidden by tee
+        run: |
+          {
+            echo "### tp::ThreadPool throughput"
+            echo "\`$(lscpu | sed -n 's/^Model name: *//p')\`"
+            echo '```'
+            ./build/tp_bench_throughput
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
   docker:
     name: docker
     runs-on: ubuntu-latest
