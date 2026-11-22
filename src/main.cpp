@@ -1,7 +1,6 @@
 #include <iostream>
 #include <chrono>
 #include <thread>
-#include <unistd.h>
 #include "utils/ConfigLoader.hpp"
 #include "tinythpool/ThreadPool.hpp"
 
@@ -14,12 +13,8 @@ int main() {
 
     ThreadPool pool;
 
-    unsigned int totalThreads = std::thread::hardware_concurrency();
-    long physicalCores = sysconf(_SC_NPROCESSORS_ONLN);
     std::cout << "#### CPU INFO #####" << "\n";
-    std::cout << "Total Threads: " << totalThreads << "\n";
-    std::cout << "Physical Cores: " << physicalCores << "\n";
-    std::cout << "Threads per Core: " << (totalThreads / physicalCores) << "\n";
+    std::cout << "Hardware threads: " << std::thread::hardware_concurrency() << "\n";
     
     std::cout << "\n##### Initializing thread pool #####" << "\n";
     if (!pool.initialize()) {

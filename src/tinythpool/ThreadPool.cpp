@@ -15,7 +15,11 @@ ThreadPool::ThreadPool() :
     tail(nullptr) {}
 
 ThreadPool::~ThreadPool() {
-    running = false;
+    {
+        // Set the flag under the lock so a worker cannot miss the wakeup.
+        std::lock_guard<std::mutex> lock(listMutex);
+        running = false;
+    }
     
     listCondition.notify_all();
     
@@ -88,12 +92,7 @@ void ThreadPool::pushTask(void* data) {
 }
 
 void ThreadPool::taskPusherThread(int id) {
-    // Set thread affinity to core 0
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-    CPU_SET(0, &cpuset);
-    pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
-    std::cout << "Task pusher thread " << id << " started on core 0" << "\n";
+    std::cout << "Task pusher thread " << id << " started" << "\n";
 
     /* Create tasks example
     TaskData* task[5] = {nullptr};
@@ -113,12 +112,7 @@ void ThreadPool::taskPusherThread(int id) {
 }
 
 void ThreadPool::workerThread(int id) {
-    // Set thread affinity to core 1
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-    CPU_SET(1, &cpuset);
-    pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
-    std::cout << "Worker thread " << id << " started on core 1" << "\n";
+    std::cout << "Worker thread " << id << " started" << "\n";
 
     while (running) {
         void* taskData = nullptr;
@@ -149,9 +143,13 @@ void ThreadPool::workerThread(int id) {
         if (taskData != nullptr) {
             std::cout << "Worker thread " << id << " processing task..." << "\n";
             TaskData* data = static_cast<TaskData*>(taskData);
-            data->callBackFunc();
-            // Sleep to simulate work
-            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+            try {
+                data->callBackFunc();
+            } catch (const std::exception& e) {
+                std::cerr << "Worker thread " << id << " task failed: " << e.what() << "\n";
+            } catch (...) {
+                std::cerr << "Worker thread " << id << " task failed\n";
+            }
             delete data;
         }
         delete nodeToDelete;

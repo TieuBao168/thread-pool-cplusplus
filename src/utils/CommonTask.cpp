@@ -1,9 +1,8 @@
 #include <random>
-#include <ctime>
 #include "utils/CommonTask.hpp"
 
 TaskData* CommonTask::generateRandomTask() {
-    static std::mt19937 rng(static_cast<unsigned int>(std::time(nullptr)));
+    thread_local std::mt19937 rng(std::random_device{}());
     
     std::uniform_int_distribution<int> taskTypeDist(0, static_cast<int>(TaskType::Count) - 1);
     TaskType taskType = static_cast<TaskType>(taskTypeDist(rng));
