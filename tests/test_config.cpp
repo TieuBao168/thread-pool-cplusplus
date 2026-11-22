@@ -307,6 +307,9 @@ TP_TEST("ConfigLoader-era keys") {
         TP_CHECK(contains(c.warnings[3], "ignored"));
     }
     TP_CHECK_THROWS(Config::fromString("worker_count = -1\n"), ConfigError);
+    // The old loaders rejected 0 workers; it must not silently become "auto".
+    TP_CHECK_THROWS(Config::fromString("worker_count = 0\n"), ConfigError);
+    TP_CHECK_THROWS(Config::fromString("NUMS_OF_WORKER 0\n"), ConfigError);
 }
 
 TP_TEST("whitespace form only for legacy keys") {

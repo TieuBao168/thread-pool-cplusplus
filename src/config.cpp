@@ -63,6 +63,13 @@ std::size_t parseSize(const std::string& ctx, const std::string& key, const std:
     return static_cast<std::size_t>(v);
 }
 
+// Legacy worker keys rejected 0; keep that instead of silently meaning "auto".
+std::size_t parseLegacyWorkers(const std::string& ctx, const std::string& key, const std::string& value) {
+    const std::size_t n = parseSize(ctx, key, value);
+    if (n == 0) invalid(ctx, value, key, "a positive integer; use num_workers = 0 for one worker per CPU");
+    return n;
+}
+
 // "0,2, 4" -> {0, 2, 4}. Rejects empty items ("0,,2") and non-numbers.
 std::vector<unsigned> parseCpuList(const std::string& ctx, const std::string& key, const std::string& value) {
     std::vector<unsigned> cpus;
@@ -122,12 +129,12 @@ void applyKey(Config& c, const std::string& rawKey, const std::string& rawValue,
         else if (lv == "debug") c.log_level = LogLevel::Debug;
         else invalid(ctx, value, key, "off, error, warn, info or debug");
     } else if (key == "nums_of_worker") {  // legacy format
-        c.num_workers = parseSize(ctx, "NUMS_OF_WORKER", value);
+        c.num_workers = parseLegacyWorkers(ctx, "NUMS_OF_WORKER", value);
         c.warnings.push_back(ctx + "'NUMS_OF_WORKER' is deprecated, use 'num_workers' instead");
     } else if (key == "nums_of_task_pusher") {  // legacy, no longer meaningful
         c.warnings.push_back(ctx + "'NUMS_OF_TASK_PUSHER' is obsolete and ignored");
     } else if (key == "worker_count") {  // ConfigLoader-era names
-        c.num_workers = parseSize(ctx, key, value);
+        c.num_workers = parseLegacyWorkers(ctx, key, value);
         c.warnings.push_back(ctx + "'worker_count' is deprecated, use 'num_workers' instead");
     } else if (key == "queue_size") {
         c.queue_capacity = parseSize(ctx, key, value);
