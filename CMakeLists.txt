@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(tp_thread_pool
-    VERSION 1.0.0
+    VERSION 1.1.0
     DESCRIPTION "Configurable C++17 thread pool"
     LANGUAGES CXX)
 
