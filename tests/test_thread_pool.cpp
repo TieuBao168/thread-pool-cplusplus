@@ -69,10 +69,11 @@ TP_TEST("post runs every task and counts failures") {
 }
 
 TP_TEST("tasks run in parallel on all workers") {
-    tp::ThreadPool pool(quiet(4));
-    TP_CHECK_EQ(pool.size(), 4u);
+    // State shared with tasks is declared before the pool so it outlives the workers.
     std::atomic<int> running{0};
     Gate gate;
+    tp::ThreadPool pool(quiet(4));
+    TP_CHECK_EQ(pool.size(), 4u);
     std::vector<std::future<std::thread::id>> fs;
     for (int i = 0; i < 4; ++i) {
         fs.push_back(pool.submit([&] {
@@ -100,9 +101,9 @@ TP_TEST("destructor drains queued tasks by default") {
 }
 
 TP_TEST("discard shutdown drops queued tasks and breaks their futures") {
-    tp::ThreadPool pool(quiet(1));
     Gate gate;
     std::promise<void> started;
+    tp::ThreadPool pool(quiet(1));
     auto blocker = pool.submit([&] { started.set_value(); gate.wait(); });
     started.get_future().wait();  // the blocker is running, not queued
     std::vector<std::future<int>> queued;
@@ -128,9 +129,9 @@ TP_TEST("submit after shutdown throws, post returns false") {
 }
 
 TP_TEST("bounded queue: Reject") {
-    tp::ThreadPool pool(quiet(1).queueCapacity(2).onOverflow(tp::OverflowPolicy::Reject));
     Gate gate;
     std::promise<void> started;
+    tp::ThreadPool pool(quiet(1).queueCapacity(2).onOverflow(tp::OverflowPolicy::Reject));
     pool.post([&] { started.set_value(); gate.wait(); });
     started.get_future().wait();  // worker busy, queue empty
     TP_CHECK(pool.post([] {}));
@@ -142,9 +143,9 @@ TP_TEST("bounded queue: Reject") {
 }
 
 TP_TEST("bounded queue: CallerRuns executes on the caller") {
-    tp::ThreadPool pool(quiet(1).queueCapacity(1).onOverflow(tp::OverflowPolicy::CallerRuns));
     Gate gate;
     std::promise<void> started;
+    tp::ThreadPool pool(quiet(1).queueCapacity(1).onOverflow(tp::OverflowPolicy::CallerRuns));
     pool.post([&] { started.set_value(); gate.wait(); });
     started.get_future().wait();
     pool.post([] {});  // fills the queue
@@ -169,9 +170,9 @@ TP_TEST("bounded queue: Block waits for space") {
 }
 
 TP_TEST("blocked producer is released by shutdown") {
-    tp::ThreadPool pool(quiet(1).queueCapacity(1).onOverflow(tp::OverflowPolicy::Block));
     Gate gate;
     std::promise<void> started;
+    tp::ThreadPool pool(quiet(1).queueCapacity(1).onOverflow(tp::OverflowPolicy::Block));
     pool.post([&] { started.set_value(); gate.wait(); });
     started.get_future().wait();
     pool.post([] {});  // queue now full
