@@ -4,6 +4,7 @@
 #include "tp/config.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -12,6 +13,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -46,6 +48,10 @@ struct Stats {
 };
 
 namespace detail {
+
+/// Result type of a task, with std::async semantics (decay-copied arguments).
+template <class F, class... Args>
+using result_t = std::invoke_result_t<std::decay_t<F>, std::decay_t<Args>...>;
 
 /// Move-only type-erased `void()` callable (std::function needs copyable).
 class Task {
@@ -133,10 +139,39 @@ public:
     template <class F, class... Args>
     bool post(F&& f, Args&&... args);
 
+    // ---- Non-blocking / bounded variants ---------------------------------
+    // These ignore the overflow policy: on a full queue they wait at most
+    // `timeout` for a free slot (zero for tryPost/trySubmit), never throw for
+    // a full or stopped pool, and never run the task on the caller.
+    // A refused task counts in Stats::rejected.
+
+    /// Queues the task only if a slot is free right now.
+    template <class F, class... Args>
+    bool tryPost(F&& f, Args&&... args);
+
+    /// Waits up to `timeout` for a free slot.
+    template <class Rep, class Period, class F, class... Args>
+    bool tryPostFor(const std::chrono::duration<Rep, Period>& timeout, F&& f, Args&&... args);
+
+    /// Like submit(), but returns std::nullopt instead of blocking or throwing.
+    template <class F, class... Args>
+    auto trySubmit(F&& f, Args&&... args)
+        -> std::optional<std::future<detail::result_t<F, Args...>>>;
+
+    template <class Rep, class Period, class F, class... Args>
+    auto trySubmitFor(const std::chrono::duration<Rep, Period>& timeout, F&& f, Args&&... args)
+        -> std::optional<std::future<detail::result_t<F, Args...>>>;
+
     /// Blocks until the queue is empty and no task is running, including
     /// tasks run inline by caller_runs. Producers still blocked on a full
     /// queue have not queued their task yet and are not waited for.
     void waitIdle();
+
+    /// waitIdle() with a limit. Returns true if the pool became idle in time.
+    template <class Rep, class Period>
+    bool waitIdleFor(const std::chrono::duration<Rep, Period>& timeout) {
+        return waitIdleUntil(deadlineAfter(timeout));
+    }
 
     /// Stops accepting tasks and joins the workers. Idempotent.
     void shutdown();
@@ -151,10 +186,25 @@ public:
 private:
     enum class Enqueued { Queued, RanInline, Rejected, Stopped };
 
+    using Clock = std::chrono::steady_clock;
+
     template <class F, class... Args>
     static auto bind(F&& f, Args&&... args);
 
-    Enqueued enqueue(detail::Task&& task);
+    /// now + timeout, saturating instead of overflowing for huge timeouts.
+    template <class Rep, class Period>
+    static Clock::time_point deadlineAfter(const std::chrono::duration<Rep, Period>& timeout) {
+        const auto now = Clock::now();
+        if (timeout <= timeout.zero()) return now;
+        if (std::chrono::duration<double>(timeout) >= std::chrono::duration<double>(Clock::time_point::max() - now))
+            return Clock::time_point::max();
+        return now + std::chrono::duration_cast<Clock::duration>(timeout);
+    }
+
+    /// `deadline` == nullptr: apply the overflow policy. Otherwise wait for a
+    /// slot until *deadline and report Rejected on timeout.
+    Enqueued enqueue(detail::Task&& task, const Clock::time_point* deadline = nullptr);
+    bool waitIdleUntil(Clock::time_point deadline);
     void workerLoop(std::size_t index);
     bool needWakeup() noexcept;  // call with mutex_ held
     void runTask(detail::Task& task) noexcept;
@@ -212,6 +262,35 @@ template <class F, class... Args>
 bool ThreadPool::post(F&& f, Args&&... args) {
     Enqueued r = enqueue(detail::Task(bind(std::forward<F>(f), std::forward<Args>(args)...)));
     return r == Enqueued::Queued || r == Enqueued::RanInline;
+}
+
+template <class F, class... Args>
+bool ThreadPool::tryPost(F&& f, Args&&... args) {
+    return tryPostFor(Clock::duration::zero(), std::forward<F>(f), std::forward<Args>(args)...);
+}
+
+template <class Rep, class Period, class F, class... Args>
+bool ThreadPool::tryPostFor(const std::chrono::duration<Rep, Period>& timeout, F&& f, Args&&... args) {
+    const Clock::time_point deadline = deadlineAfter(timeout);
+    return enqueue(detail::Task(bind(std::forward<F>(f), std::forward<Args>(args)...)), &deadline) ==
+           Enqueued::Queued;
+}
+
+template <class F, class... Args>
+auto ThreadPool::trySubmit(F&& f, Args&&... args)
+    -> std::optional<std::future<detail::result_t<F, Args...>>> {
+    return trySubmitFor(Clock::duration::zero(), std::forward<F>(f), std::forward<Args>(args)...);
+}
+
+template <class Rep, class Period, class F, class... Args>
+auto ThreadPool::trySubmitFor(const std::chrono::duration<Rep, Period>& timeout, F&& f, Args&&... args)
+    -> std::optional<std::future<detail::result_t<F, Args...>>> {
+    using R = detail::result_t<F, Args...>;
+    std::packaged_task<R()> task(bind(std::forward<F>(f), std::forward<Args>(args)...));
+    std::future<R> future = task.get_future();
+    const Clock::time_point deadline = deadlineAfter(timeout);
+    if (enqueue(detail::Task(std::move(task)), &deadline) != Enqueued::Queued) return std::nullopt;
+    return std::optional<std::future<R>>(std::move(future));
 }
 
 }  // namespace tp

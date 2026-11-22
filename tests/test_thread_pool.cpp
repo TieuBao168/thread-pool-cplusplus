@@ -192,6 +192,72 @@ TP_TEST("const char* constructor accepts nullptr") {
     TP_CHECK(pool.size() >= 1u);
 }
 
+TP_TEST("tryPost/trySubmit never block on a full queue") {
+    Gate gate;
+    std::promise<void> started;
+    // Block policy: plain post() would wait here, try* must not.
+    tp::ThreadPool pool(quiet(1).queueCapacity(1).onOverflow(tp::OverflowPolicy::Block));
+    pool.post([&] { started.set_value(); gate.wait(); });
+    started.get_future().wait();
+    TP_CHECK(pool.tryPost([] {}));   // takes the only slot
+    const auto t0 = std::chrono::steady_clock::now();
+    TP_CHECK(!pool.tryPost([] {}));
+    TP_CHECK(!pool.trySubmit([] { return 1; }).has_value());
+    TP_CHECK(std::chrono::steady_clock::now() - t0 < 1s);
+    TP_CHECK_EQ(pool.stats().rejected, 2u);
+    gate.open();
+    pool.waitIdle();
+    auto f = pool.trySubmit([](int a) { return a * 2; }, 21);
+    TP_CHECK(f.has_value());
+    if (f) TP_CHECK_EQ(f->get(), 42);
+}
+
+TP_TEST("tryPostFor times out, or succeeds when a slot frees in time") {
+    Gate gate;
+    std::promise<void> started;
+    tp::ThreadPool pool(quiet(1).queueCapacity(1).onOverflow(tp::OverflowPolicy::Reject));
+    pool.post([&] { started.set_value(); gate.wait(); });
+    started.get_future().wait();
+    TP_CHECK(pool.post([] {}));  // queue full
+
+    const auto t0 = std::chrono::steady_clock::now();
+    TP_CHECK(!pool.tryPostFor(50ms, [] {}));
+    const auto waited = std::chrono::steady_clock::now() - t0;
+    TP_CHECK(waited >= 45ms);  // small slack for coarse clocks
+    TP_CHECK(waited < 2s);
+
+    std::thread opener([&] {
+        std::this_thread::sleep_for(20ms);
+        gate.open();  // the worker frees the slot
+    });
+    auto f = pool.trySubmitFor(5s, [] { return 7; });
+    opener.join();
+    TP_CHECK(f.has_value());
+    if (f) TP_CHECK_EQ(f->get(), 7);
+}
+
+TP_TEST("try* on a stopped pool return false / nullopt") {
+    tp::ThreadPool pool(quiet(1));
+    pool.shutdown();
+    TP_CHECK(!pool.tryPost([] {}));
+    TP_CHECK(!pool.tryPostFor(10ms, [] {}));
+    TP_CHECK(!pool.trySubmit([] {}).has_value());
+}
+
+TP_TEST("waitIdleFor reports busy and idle") {
+    Gate gate;
+    std::promise<void> started;
+    tp::ThreadPool pool(quiet(1));
+    pool.post([&] { started.set_value(); gate.wait(); });
+    started.get_future().wait();
+    TP_CHECK(!pool.waitIdleFor(30ms));
+    gate.open();
+    TP_CHECK(pool.waitIdleFor(5s));
+    TP_CHECK(pool.waitIdleFor(std::chrono::hours::max()));  // saturates, no overflow
+    auto f = pool.submit([&pool] { return pool.waitIdleFor(1ms); });
+    TP_CHECK_THROWS(f.get(), std::logic_error);
+}
+
 TP_TEST("bounded queue: Block waits for space") {
     tp::ThreadPool pool(quiet(2).queueCapacity(4).onOverflow(tp::OverflowPolicy::Block));
     std::atomic<int> done{0};

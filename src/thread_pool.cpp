@@ -52,7 +52,7 @@ ThreadPool::~ThreadPool() {
     shutdown(config_.shutdown_policy);
 }
 
-ThreadPool::Enqueued ThreadPool::enqueue(detail::Task&& task) {
+ThreadPool::Enqueued ThreadPool::enqueue(detail::Task&& task, const Clock::time_point* deadline) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (stopping_) {
         ++rejected_;
@@ -60,7 +60,20 @@ ThreadPool::Enqueued ThreadPool::enqueue(detail::Task&& task) {
     }
 
     const std::size_t cap = config_.queue_capacity;
-    if (cap != 0 && queue_.size() >= cap) {
+    const auto hasSpace = [&] { return stopping_ || queue_.size() < cap; };
+
+    if (cap != 0 && queue_.size() >= cap && deadline != nullptr) {
+        // try*/try*For: bounded wait, independent of the overflow policy.
+        // wait_until re-checks the predicate on timeout, so a notify that
+        // races with the timeout still hands the slot to this producer.
+        ++blockedProducers_;
+        const bool gotSlot = notFull_.wait_until(lock, *deadline, hasSpace);
+        --blockedProducers_;
+        if (stopping_ || !gotSlot) {
+            ++rejected_;
+            return stopping_ ? Enqueued::Stopped : Enqueued::Rejected;
+        }
+    } else if (cap != 0 && queue_.size() >= cap) {
         OverflowPolicy policy = config_.overflow_policy;
         // A worker blocking on its own full queue could deadlock the pool.
         if (policy == OverflowPolicy::Block && onWorkerThread()) policy = OverflowPolicy::CallerRuns;
@@ -79,7 +92,7 @@ ThreadPool::Enqueued ThreadPool::enqueue(detail::Task&& task) {
                 return Enqueued::RanInline;
             case OverflowPolicy::Block:
                 ++blockedProducers_;
-                notFull_.wait(lock, [&] { return stopping_ || queue_.size() < cap; });
+                notFull_.wait(lock, hasSpace);
                 --blockedProducers_;
                 if (stopping_) {
                     ++rejected_;
@@ -172,6 +185,12 @@ void ThreadPool::waitIdle() {
     if (onWorkerThread()) throw std::logic_error("tp::ThreadPool::waitIdle() called from a worker");
     std::unique_lock<std::mutex> lock(mutex_);
     idle_.wait(lock, [this] { return queue_.empty() && active_ == 0; });
+}
+
+bool ThreadPool::waitIdleUntil(Clock::time_point deadline) {
+    if (onWorkerThread()) throw std::logic_error("tp::ThreadPool::waitIdleFor() called from a worker");
+    std::unique_lock<std::mutex> lock(mutex_);
+    return idle_.wait_until(lock, deadline, [this] { return queue_.empty() && active_ == 0; });
 }
 
 void ThreadPool::shutdown() { shutdown(config_.shutdown_policy); }
