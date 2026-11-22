@@ -1,0 +1,49 @@
+# Thread pool configuration (example).
+#
+# Copy to threadpool.ini and pass its path to tp::Config::load(), or point
+# the TP_CONFIG_FILE environment variable at it. Every key is optional; the
+# values below are the built-in defaults.
+#
+# Syntax: `key = value`. `#` and `;` start a comment (whole line or trailing).
+# Keys and enum values are case-insensitive. Section headers are ignored.
+#
+# Priority, lowest to highest:
+#   defaults < this file < TP_* environment variables < code
+# Each key can be overridden by TP_<KEY in upper case>, e.g. TP_NUM_WORKERS=8.
+
+[thread_pool]
+
+# Number of worker threads. 0 = std::thread::hardware_concurrency()
+# (at least 1). Maximum 4096.
+num_workers = 0
+
+# Maximum number of queued tasks. 0 = unbounded.
+queue_capacity = 0
+
+# What happens when a bounded queue is full:
+#   block        wait until a slot frees up
+#   reject       submit() throws QueueFullError, post() returns false
+#   caller_runs  run the task on the submitting thread
+overflow_policy = block
+
+# What happens to queued tasks at shutdown:
+#   drain    run every queued task before the workers exit
+#   discard  drop queued tasks (their futures get broken_promise)
+shutdown_policy = drain
+
+# CPU pinning for worker threads:
+#   none         let the OS schedule freely
+#   round_robin  worker i -> cpu i % hardware threads
+#   0,2,4        worker i -> the i-th entry of this list (wrapping around)
+cpu_affinity = none
+
+# Base name given to worker threads (non-empty; may contain spaces,
+# but not '#' or ';').
+thread_name = tp-worker
+
+# Library log verbosity: off | error | warn | info | debug
+log_level = warn
+
+# Legacy format (still accepted, with a warning):
+#   NUMS_OF_WORKER 3        -> same as num_workers = 3
+#   NUMS_OF_TASK_PUSHER 1   -> ignored
